@@ -46,14 +46,6 @@ p <- rg[, .(.N), by=month_rg2][, yoy := (N - lag(N, 12)) / lag(N, 12)] %>%
 
 ggplotly(p) 
 
-rg[, .(.N), by=month_rg2][, yoy := (N - lag(N, 12)) / lag(N, 12)] %>% 
-  highcharter::hw_grid(
-    hchart("column", hcaes(x = month_rg2, y = N)),
-    hchart("line", hcaes(x = month_rg2, y = N))
-  ) %>% 
-  hc_title(text = "Registration in Each Month") %>% 
-  hc_add_theme(hc_theme_chalk())
-
 
 # – Make some comments on the trends and any lower periods (remember that Month 1 is January)
 #  每6个月有一次高峰和谷底
