@@ -13,7 +13,10 @@ library(scales)
 library(forecast)
 library(Metrics)
 library(hrbrthemes)
-
+library(kableExtra)
+library(gganimate)
+library(babynames)
+library(viridis)
 
 # registration data
 rg <- fread("~/Desktop/Mastering-Product-Analytics/MPA/registrations.csv") 
@@ -171,6 +174,62 @@ acvt[, type:= fifelse(activity_month== registration_month, "New",
 
 x <- acvt[,.(activity_month, registration_month), by=id]
 
+# Task 3: Retention -------------------------------------------------------
+# Basic task (T3)
+# – Calculate what percentage of Month 1 registered users have been active in Month 2 (second month retention rate)
+table(acvt$id %in% rg$id)
+table(rg$id %in% acvt$id )
+
+rertain_2nd_M <- acvt[activity_month == registration_month +1,.(activity_month, registration_month)] 
+
+avg_ratio <- nrow(rertain_2nd_M) / length(unique(acvt$id))
+
+rertain_ratio <- merge(rertain_2nd_M[,.N,by = registration_month],
+                       rg[,.(.N), by = registration_month], by = "registration_month")[,.(Month =registration_month,No.Register = N.y, No.Retention=N.x,ratio=round(N.x/N.y, 3))]
+
+kbl(rertain_ratio) %>%
+  kable_paper(full_width = F) %>%
+  row_spec(c(1,13), bold = T, color = "white", background = "#D7261E") %>% 
+  scroll_box(height = "250px")
+
+rertain_ratio%>% 
+  ggplot(aes(x=Month, y=ratio)) +
+  geom_line(color="grey") +
+  geom_point(shape=21, color="black", fill="#69b3a2", size=4)+
+  theme_ipsum() +
+  geom_hline( yintercept=avg_ratio, color="orange", size=0.5) +
+  scale_x_continuous(breaks=seq(1, 21, by = 1),
+                     labels = unique(acvt$acvt_Month))
+
+# – Calculate the same rate for users who registered in Month 13 (What percentage of them have been active in Month 14?)
+# – What can explain the difference?
+#   • Extra tasks
+# – T3A: Plot the second month retention rate over time (from Month 1 to Month 20). Do you see a big change somewhere?
 
 
+#   – T3B: Compare the Month 1 to Month 2 retention rate among users with different operating systems. Do you see any difference?
+# os_retain <- 
+os_retain <- acvt[activity_month == registration_month +1, .(No_retention = .N), by = c('registration_month','operating_system')][, .(operating_system,No_retention, Ratio = No_retention/sum(No_retention)),by =registration_month]
+#plot
+os_retain %>% 
+  ggplot(aes(registration_month)) + # bar automatically calculate numbers, so it needs x axis only
+  geom_bar(aes(fill = operating_system)) +
+  labs(x= 'Cities', y= 'Number of hotels', fill= 'Distance from city center') +
+  theme(legend.position="top")
 
+# Plot
+  os_retain %>%
+  ggplot( aes(x=registration_month, y=No_retention, group=operating_system, color=operating_system)) +
+  geom_line() +
+  geom_point() +
+  scale_colour_viridis_d(option = "plasma") +
+  ggtitle("Popularity of American names in the previous 30 years") +
+  theme_ipsum() +
+  ylab("Number of babies born") +
+  transition_reveal(registration_month)
+  
+  
+  
+  
+  
+  
