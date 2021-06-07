@@ -73,8 +73,6 @@ highchart() %>%
 # Extra tasks
 # – T1A: Calculate year-over-year growth of registrations (i.e. percentage increase or decline of Month 13 over Month 1). What would you project for Month 22?
 r22g <- rg[, .(.N), by=registration_month]
-
-
 # splitting data into train and valid sets
 ## 75% of the sample size
 # splitting data into train and valid sets
@@ -212,10 +210,11 @@ rertain_ratio%>%
 os_retain <- acvt[activity_month == registration_month +1, .(No_retention = .N), by = c('registration_month','operating_system')][, .(operating_system,No_retention, Ratio = No_retention/sum(No_retention)),by =registration_month]
 #plot
 os_retain %>% 
-  ggplot(aes(registration_month)) + # bar automatically calculate numbers, so it needs x axis only
-  geom_bar(aes(fill = operating_system)) +
+  ggplot(aes(fill=operating_system, y=No_retention, x=registration_month)) + 
+  theme_ipsum() +
+  geom_bar(position="fill", stat="identity")+
   labs(x= 'Cities', y= 'Number of hotels', fill= 'Distance from city center') +
-  theme(legend.position="top")
+  theme(legend.position="top") # remember theme() function!
 
 # Plot
   os_retain %>%

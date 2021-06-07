@@ -1,0 +1,298 @@
+---
+title: "User Analysis: Registration, Activity and Retention"
+author: '2000692'
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    code_download: TRUE
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(rmdformats)
+opts_chunk$set(echo=FALSE, prompt=FALSE, tidy=TRUE, comment=NA, message=FALSE, warning=FALSE)
+
+rm(list = ls())
+library(tidyverse)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(wesanderson)
+library(ggthemr)
+library(plotly)
+library(gapminder)
+library(highcharter)
+library(ggiraph)
+library(scales)
+library(forecast)
+library(Metrics)
+library(hrbrthemes)
+library(kableExtra)
+library(gganimate)
+library(babynames)
+library(viridis)
+theme_set(theme_light()) 
+# load data
+# registration data
+rg <- fread("~/Desktop/Mastering-Product-Analytics/MPA/registrations.csv") 
+str(rg) # check the structure
+
+# activity data
+acvt <- fread("~/Desktop/Mastering-Product-Analytics/MPA/activity.csv")
+str(acvt) # check the structure
+```
+
+This report demonstrates the final assignment of the CEU course [Mastering Product Analytics](https://courses.ceu.edu/courses/2020-2021/mastering-product-analytics-0), where we study a sub-sampled and simplified version of a real SaaS product. All relevant materials are stored in [my github](https://github.com/Deborah-Jia/Mastering-Product-Analytics-). If you would like to take a quick look at the code, click "**Code**" on the top right and download the Rmarkdown source file. Most graphs in this report are interactive; hover over them, and you will see more info.
+
+# 1.  Acquisition
+## a.  Plot the number of registrations in each month and Make some comments on the trends and any lower periods.
+
+The month number of 1 to 20 seems quite confusing, so before we calculate the registration number each month, we create a new column and assign the month name for each registration. Then, we group the data table by month and count the rows in each group/month. As there are no duplicates for each month, the row number is the registration number each month. We also calculate the year-over-year rate by setting a lag of 12. With the ready data table, we plot the monthly registration and yoy rate in one graph.
+
+```{r}
+# change numbers to month names.
+rg[, Month := fifelse(registration_month <= 12, 
+                          rep(month.abb, 2)[registration_month], 
+                          paste0("2nd Year ", rep(month.abb, 2)[registration_month]))]
+
+# sorting bars by factor ordering
+rg$Month <- factor(rg$Month,levels = unique((rg$Month)))
+
+# group the registration and create a new data.table to save the result
+agg_rg <- rg[, .(.N), by=Month][, yoy := round((N - lag(N, 12))/ lag(N, 12), digits = 3) ]
+
+# plot registration numbers and year over year ratio
+highchart() %>% 
+  hc_yAxis_multiples(
+    list(lineWidth = 3,title = list(text = "Registration")),
+    list(showLastLabel = F, opposite = T, title = list(text = "yoy rate")))%>% 
+  hc_add_series(data = agg_rg, hcaes(x = Month, y = N),type = "column", yAxis = 0) %>% 
+  hc_add_series(data = agg_rg, hcaes(x = Month, y = yoy),color = "red",type = "spline", yAxis = 1) %>%
+  hc_tooltip(
+    useHTML = TRUE,                            
+    formatter = JS(
+      "
+      function(){
+        outHTML = '<b>' + this.point.Month + '</b> <br> Registration ' + this.point.N + '<br> Year over year ratio ' + this.point.yoy*100 + '%'
+        return(outHTML)
+      }
+
+      "
+    ),
+    shape = "square", 
+    borderWidth = 0   
+  ) %>% 
+  hc_xAxis(categories = agg_rg$Month ) %>% 
+  hc_legend(enabled = F) %>% 
+  hc_title(text = "Registration & Year over Year Ratio in Each Month") 
+```
+
+We notice four registration cycles from the blue bar chart, each of similar six months (Jan-July, July-Dec, Dec-2nd year June and the last half). For each cycle, higher spots appear in March-May and Oct-Nov.  From a global view, lower periods include Jan-Feb, June-July, Dec-2nd year Jan and 2nd Year June-2nd Year Aug. Interesting, both the relative high spots and absolute more down period are quarterly end. If we take a closer look, these six-month cycles can also be interpreted as: we gain most registration in Spring and Fall, and fewer users register in Winter and Summer.  
+
+## b.  Calculate year-over-year growth of registrations (i.e. percentage increase or decline of Month 13 over Month 1). What would you project for Month 22?
+
+We also plot the line chart of the year-over-year ratio. Compared with months in the first year, all months except 2nd year Sep have increasing registration. What about the second year in October? We use **ARIMA** (Autoregressive integrated moving average) to predict the 22nd month; this goes as follows:
+
+  1. Split previous 21 months into **train** and **valid** group, with a ratio of 3:1.
+  2. Use **auto.arima** and **predict** functions to build a model and predict the 22nd month; here, we use data in the **train** group.
+  3. Calculate **RMSE** (Root Mean Square Error) of the model with **valid** data.
+  4. If the RMSE is prominent enough, use the projected value.
+  5. Plot the new bar chart showing the 22nd month.
+
+```{r}
+r22g <- rg[, .(.N), by=registration_month]
+# splitting data into train and valid sets
+## 75% of the sample size
+# splitting data into train and valid sets
+train = r22g[1:15,]
+valid = r22g[16:21,]
+# removing "Month" column
+train$registration_month = NULL
+# training model
+model = auto.arima(train)
+
+# forecasting
+forecast = predict(model,6)
+
+# plot the new bar/prediction
+pred_row <- data.table("2nd Year Oct", forecast$pred[1], NA)
+
+#Naming the Data Frame - Step 2  
+names(pred_row) <- names(agg_rg)
+  
+agg_rg <- rbind(agg_rg, pred_row) 
+
+# plot the prediction
+agg_rg %>% 
+hchart("column", hcaes(x = Month , y = N)) %>% 
+  hc_xAxis(categories = agg_rg$Month ) %>% 
+  hc_legend(enabled = F) %>% 
+  hc_title(text = "Predicted Registration in Each Month") %>% 
+  hc_add_theme(hc_theme_chalk())
+```
+
+From the most right bar, we see a rising trend from 2nd year Sep, which coincides with our observed trend in previous years' September and October.
+
+## c.  Do you see any regional difference in registration trends? Which geography is likely to drive future growth in registrations?
+
+We separate all registration into three regional groups and check the similarity and differences.
+
+```{r}
+p <- rg[, .(Registration=.N , region), by=Month] %>% 
+  ggplot()  +
+  geom_bar(aes(x=Month, y=Registration, fill= region, group = 1),stat="identity")+
+  facet_wrap(~ region) +
+  labs(title = "Registration in each month, by region") +
+  theme(axis.text.y=element_blank(),
+        axis.text.x=element_blank(),legend.position = "none") 
+
+ggplotly(p) 
+```
+
+EMEA and America have the same scales of registration number, while the rest of the world accounts for the most significant part of monthly registration. However, when it comes to the growth period, the trends in EMEA and ROW look similar; both of them have the highest growth in the Fall and Spring. Usually, the strong growth takes 2-3 months, but if we take a look at the Autumn in the first year and the Spring in the second year, the period consists of four-month. In a word, periods of a substantial registration increase remain longer in the American region. 
+
+Considering the more extended period and the relatively lower portion in America, we suggest extra efforts to be put in America as it has enormous growth potential.
+
+# 2.  Activity
+## a.  Plot the number of active users in each month and make some comments on the trends and any lower periods (remember that Month 1 is January)
+
+Like the way we process monthly registration, we group the activity data by month and count the active status number.
+
+```{r}
+acvt[, acvt_Month := fifelse(activity_month <= 12, 
+                      rep(month.abb, 2)[activity_month], 
+                      paste0("2nd Year ", rep(month.abb, 2)[activity_month]))]
+
+acvt[, .(.N, acvt_Month),by=activity_month] %>% 
+  hchart("column", hcaes(x = acvt_Month , y = N)) %>% 
+  hc_yAxis(title = list(text = "")) %>% 
+  hc_xAxis(title = list(text = "")) %>% 
+  hc_legend(enabled = F) %>% 
+  hc_title(text = "Active Users in Each Month") %>% 
+  hc_add_theme(hc_theme_google()) %>% 
+  hc_tooltip(
+    useHTML = TRUE,                            
+    formatter = JS(
+      "
+      function(){
+        outHTML = '<b>' +this.point.acvt_Month + '</b> <br> Active Users: ' + this.point.N 
+        return(outHTML)
+      }
+      "
+    )
+  ) 
+
+```
+
+There are three cycles where we observe three crests and four troughs. In overview, the active user number continues to grow, as the maximum value in each six-month cycle keeps increasing, and the highest spot in the first cycle (Jan-July) is even lower than the lowest spots in the second and third cycles.
+
+Like the registration graph trend, there are many more active users in Spring and Fall, while most lower points in Winter and Summer.
+
+## b.  Plot the percentage of America among active users in each month.
+
+We filter out the American region and calculate the monthly activity rate. To compare with the monthly average, we calculate the average activity rate (20%) for all months in the Americas region and draw a **yellow line** on the graph for comparison.
+
+```{r}
+avg_ratio <- round(acvt[region == "America", .(.N),]/nrow(acvt), 2)
+
+merge(acvt[region == "America", .(.N),by= activity_month],
+      acvt[,.(.N),by= activity_month],
+      by = "activity_month")[, .(American_ratio = round(N.x/N.y, 3),activity_month )] %>% 
+  ggplot(aes(x=activity_month, y=American_ratio)) +
+  geom_line(color="grey") +
+  geom_point(shape=21, color="black", fill="#69b3a2", size=4)+
+  geom_hline( yintercept= 0.2, color="orange", size=0.5) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5))+
+  scale_x_continuous(breaks=seq(1, 21, by = 1),
+                     labels = unique(acvt$acvt_Month)) 
+```
+
+Active users in America have a decreasing trend over time: since April, it has hardly reached 25% among all regions. Still, we see from July of the second year that the activity ratio is rising and might go above the average. Combined with the registration potential in America (more extended high registration period), we advise the marketing team to pay more attention to user retention.
+
+# 3.  Retention
+## a.  Calculate second month retention rate and explain the difference.
+
+We check and confirm that the registration and activity lists have the same bunch of users, so we use an activity data table. We calculated the retention ratio of all months, including the required two Januaries. As indicated by red cells in the table, we see that the second-month retention rate drops by 10% (from 0.463 to 0.368). What could be the reason?
+
+```{r}
+rertain_2nd_M <- acvt[activity_month == registration_month +1,.(activity_month, registration_month)] 
+
+avg_ratio <- nrow(rertain_2nd_M) / length(unique(acvt$id))
+
+rertain_ratio <- merge(rertain_2nd_M[,.N,by = registration_month],
+                       rg[,.(.N), by = registration_month], by = "registration_month")[,.(Month =registration_month,No.Register = N.y, No.Retention=N.x,ratio=round(N.x/N.y, 3))]
+
+kbl(rertain_ratio) %>%
+  kable_paper(full_width = F) %>%
+  row_spec(c(1,13), bold = T, color = "white", background = "#D7261E") %>% 
+  scroll_box(height = "450px", width = "600px" )
+```
+
+First, the retention ratio is on a descending trend: the high retention rate in the first four months never appears again. This trend might be caused by a loss of interest from users. In the first few months, users are fascinated by the new product and would like to spend more time on it. But as time goes by, users might find alternatives and let go of our product. Also, it is scarcely possible that retention rate could have stable values in two consecutive years, as we could not predict unsystematic risk. For example, no one expected Zoom app and hygiene products to become crucial in 2020, and in 2019, tourism and food service had thriving businesses as in previous years. COVID changed everything.
+
+## b.  Plot the second month retention rate over time (from Month 1 to Month 20). Do you see a big change somewhere?
+
+```{r}
+rertain_ratio%>% 
+  ggplot(aes(x=Month, y=ratio)) +
+  geom_line(color="grey") +
+  geom_point(shape=21, color="grey", fill="#C1328E", size=3)+
+  geom_hline( yintercept=avg_ratio, color="black", size=0.5) +
+  labs(x= 'Month of registration', y= 'Retention rate') +
+  scale_x_continuous(breaks=seq(1, 21, by = 1),
+                     labels = unique(acvt$acvt_Month)) +
+    theme(axis.text.x = element_text(angle = 45, vjust = 0.5))
+```
+
+There are at least four significant changes in the graph: the retention rate drops hugely from April to May and from October to December in the first year, and it rises suddenly from July to August and from December (1st year) to February in the second year. All changes are penetrating the average line of 36.8% (the black line). If we check carefully, we notice that the sudden falls happen in Spring and Fall, while the rise occurs in Summer and Winter. Why?
+
+Let's recall how we calculate the retention rate: we divide the registration number by active users in the second month. For similar active user numbers, a great registration denominator will lead to a smaller retention ratio. From the registration bar chart, we see that the registration is relatively lower in summer and winter, and in Spring and Autumn, it is much higher. If we do a rough calculation, the retention ratio jump makes sense.
+
+## c.  Compare the Month 1 to Month 2 retention rate among users with different operating systems. Do you see any difference?
+
+To gain a comprehensive view of the retention rate among operating systems, we go the extra mile and plot the retention in all month.
+
+Windows has always played the dominant role among all systems, accounting for more than half of the total number. On the other hand, Linux seems like a niche market, where less than 5% of retained users use Linux. The battle between Mac and another unknown (let's call it "the anonymous") has much fun: from the beginning; the anonymous is more than twice the proportion of Mac, then it starts to shrink; till the January of the second year,  anonymous loses the battle, and it never fights back.
+
+```{r}
+os_retain <- acvt[activity_month == registration_month +1, .(No_retention = .N), by = c('registration_month','operating_system')][, .(operating_system,No_retention, Ratio = No_retention/sum(No_retention)),by =registration_month]
+#plot
+os_retain %>% 
+  ggplot(aes(fill=operating_system, y=No_retention, x=registration_month)) + 
+  theme_ipsum() +
+  geom_bar(position="fill", stat="identity")+
+  labs(x= 'Month of registration', y= 'Proportion of retained users') +
+  theme(legend.position="bottom",axis.text.x = element_text(angle = 45, vjust = 0.5))+
+  scale_x_continuous(breaks=seq(1, 21, by = 1),
+                     labels = unique(acvt$acvt_Month)) 
+```
+
+Staring at the above colorful toufu might not be intuitive. Thus we draw an animated chart to understand the inclination, where we can see how the anonymous falls from being par excellence with Mac to scrambling the market with Linux.
+
+```{r}
+# Plot
+  os_retain %>%
+  ggplot( aes(x=registration_month, y=No_retention, group=operating_system, color=operating_system)) +
+  geom_line() +
+  geom_point() +
+  scale_colour_viridis_d(option = "plasma") +
+  ggtitle("Popularity of operating system among retained users") +
+  ylab("Number of operating system") +
+  transition_reveal(registration_month) +
+  theme(legend.position="top",axis.title.x=element_blank(),axis.text.x = element_text(angle = 45, vjust = 0.5))+
+  scale_x_continuous(breaks=seq(1, 21, by = 1),
+                     labels = unique(acvt$acvt_Month)) 
+```
+
+# Wrap Up
+
+* **Registration remains stable, but bear in mind to exploit the American region more.** Find out the reason why America has an extended registration period will help us open the market.
+* **User activity keeps strong**. America, as our promising market, has a lower and inconsistent activity rate than expected. We need to track this issue and optimize the experience of registered users.
+* **Retention rate has large fluctuations**, even for the same month in two years we can't expect similar retention rate. It is necessary to act with caution and prepare plan B. 
+* Refine the demand analysis of Windows users while establishing a task force to study the preference of Mac buyers. We should maintain and optimize our most significant client group while moving forward with the second largest.
+
+
+
+
+
